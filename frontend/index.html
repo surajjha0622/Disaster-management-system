@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Disaster management system</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23071013'/%3E%3Cpath d='M4 17c4-6 7-6 12 0s8 6 12 0' fill='none' stroke='%2362e3ff' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M4 24c4-6 7-6 12 0s8 6 12 0' fill='none' stroke='%23ff3b6b' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><path d="M3 15c4-6 7-6 13 0s9 6 13 0" fill="none" stroke="#62e3ff" stroke-width="3" stroke-linecap="round"/><path d="M3 23c4-6 7-6 13 0s9 6 13 0" fill="none" stroke="#ff3b6b" stroke-width="3" stroke-linecap="round"/></svg>
+    <div><b>Disaster management system</b><span>Multi-zone early-warning simulation</span></div>
+  </div>
+  <div class="simulation-label"><span></span>Simulation workspace</div>
+  <div class="top-right">
+    <div class="clock" title="One tick is 10 simulated minutes">
+      <span id="simClock">Day 1 · 06:00</span>
+      <small>simulated time <em id="speedTag">×1</em></small>
+    </div>
+    <span class="pill sim" title="No real sensor data or real alerts are involved">Simulated data</span>
+    <span class="conn" id="conn" data-s="wait"><i></i><span>Connecting</span></span>
+  </div>
+</header>
+
+<button id="alarm" class="alarm" hidden></button>
+
+<!-- ============================ CONTROL ROOM ============================ -->
+<main id="view-control" class="shell">
+
+  <aside class="rail left">
+    <section class="block">
+      <button id="demoBtn" class="demo-btn">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+        <span>Run guided simulation</span>
+      </button>
+      <div class="demo-progress" id="demoProg" hidden><i></i></div>
+    </section>
+
+    <section class="block">
+      <h3>Scenario</h3>
+      <div class="scn" id="scnGrid">
+        <button data-scn="normal"><b>Normal</b><small>Quiet conditions</small></button>
+        <button data-scn="monsoon"><b>Monsoon surge</b><small>Heavy regional rainfall</small></button>
+        <button data-scn="cloudburst"><b>Cloudburst</b><small>Extreme local rainfall</small></button>
+        <button data-scn="glof"><b>Outburst flood</b><small>Sudden upstream surge</small></button>
+      </div>
+      <label class="target">Starts at
+        <select id="target"></select>
+      </label>
+    </section>
+
+    <section class="block">
+      <h3>Playback</h3>
+      <div class="row">
+        <button id="pauseBtn" class="btn">Pause</button>
+        <div class="seg" id="speedSeg"><button data-s="1">×1</button><button data-s="2">×2</button><button data-s="4">×4</button></div>
+        <button id="resetBtn" class="btn ghost">Reset</button>
+      </div>
+    </section>
+
+    <section class="block stats">
+      <div><span id="stNodes">10 / 10</span><small>station feeds</small></div>
+      <div><span id="stPeak">–</span><small id="stPeakSub">highest score</small></div>
+      <div><span id="stAlerts">0</span><small>active alerts</small></div>
+      <div><span id="stPackets">0</span><small>readings received</small></div>
+    </section>
+
+    <section class="block">
+      <h3>Zone coverage <small class="hint">sensors + sirens</small></h3>
+      <div id="zoneSummary" class="zone-summary" aria-label="Operational zones"></div>
+    </section>
+
+    <section class="block grow">
+      <h3>Primary sensor feeds <small class="hint">upstream to downstream</small></h3>
+      <ul id="nodeList" class="nodes"></ul>
+      <a class="dl" href="/api/export.csv" download>Download simulation readings as CSV</a>
+    </section>
+  </aside>
+
+  <section class="stage">
+    <div id="map" aria-label="Map of Uttarakhand showing sensor and siren nodes"></div>
+    <div class="legend">
+      <span><i data-lv="LOW"></i>Low</span><span><i data-lv="GUARDED"></i>Guarded</span><span><i data-lv="ELEVATED"></i>Elevated</span><span><i data-lv="HIGH"></i>High</span>
+      <span class="sensor-key"><i></i>Sensor</span><span class="siren-key"><i></i>Siren</span><span class="wavekey"><i></i>Flood wave</span>
+    </div>
+    <label class="basemap"><input type="checkbox" id="tiles"> Street map <small>(needs internet)</small></label>
+    <div class="note">River courses and node positions are schematic. All controls are simulated.</div>
+    <div id="caption" class="caption" hidden><p></p></div>
+  </section>
+
+  <aside class="rail right">
+    <div class="rtabs" role="tablist">
+      <button data-rt="alerts" class="on">Alerts <em id="badgeAlerts" hidden>0</em></button>
+      <button data-rt="node">Sensor</button>
+      <button data-rt="health">Node health</button>
+      <button data-rt="sirens">Sirens</button>
+      <button data-rt="feed">Log</button>
+    </div>
+
+    <div id="rt-alerts" class="rpane"></div>
+
+    <div id="rt-node" class="rpane" hidden>
+      <div id="nodeEmpty" class="empty">Select a primary sensor on the map or in the feed list to see its live readings.</div>
+      <div id="nodeBody" hidden>
+        <div class="nhead">
+          <div>
+            <h2 id="nName">–</h2>
+            <p id="nMeta"></p>
+          </div>
+          <svg class="score-ring" viewBox="0 0 100 100" aria-label="Risk score">
+            <circle cx="50" cy="50" r="42" class="rtrack"/>
+            <circle cx="50" cy="50" r="42" class="rval" id="ringVal" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 50 50)"/>
+            <text x="50" y="53" id="ringNum" text-anchor="middle">0</text>
+            <text x="50" y="69" id="ringLbl" text-anchor="middle" class="rl">Low</text>
+          </svg>
+        </div>
+        <dl class="reads">
+          <div><dt>Rainfall</dt><dd id="rRain">–</dd></div>
+          <div><dt>Water level</dt><dd id="rLevel">–</dd></div>
+          <div><dt>Change in 10 min</dt><dd id="rRise">–</dd></div>
+          <div><dt>Wind</dt><dd id="rWind">–</dd></div>
+          <div><dt>Microphone hears</dt><dd id="rAudio">–</dd></div>
+          <div><dt>Data source</dt><dd id="rSrc">–</dd></div>
+        </dl>
+        <div class="chartbox"><canvas id="nodeChart"></canvas></div>
+        <div class="spec">
+          <canvas id="spec" width="340" height="84"></canvas>
+          <p>Synthetic spectrogram of the selected sensor microphone.</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="rt-health" class="rpane" hidden></div>
+    <div id="rt-sirens" class="rpane" hidden></div>
+    <div id="rt-feed" class="rpane" hidden></div>
+  </aside>
+</main>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/chart.umd.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
